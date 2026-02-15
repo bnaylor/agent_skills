@@ -51,16 +51,13 @@ On first run, when no `.discord-coordination.json` exists in the project root, w
   "channels": {
     "coordination": "987654321"
   },
-  "identity": {
-    "self_bot_id": null,
-    "self_name": "Claude"
-  },
   "human_owner": {
     "user_id": "222222222",
     "username": "exampleuser"
   },
-  "other_agents": [
-    { "bot_id": null, "name": "Gemini" }
+  "agents": [
+    { "name": "Gemini", "bot_id": "111111111" },
+    { "name": "Claude", "bot_id": "222222222" }
   ],
   "personality": "friendly"
 }
@@ -75,8 +72,9 @@ If any step fails (MCP unresponsive, channel not found, etc.), warn the user in 
 
 Every session after bootstrap is complete:
 
-1. **Read state file** - load identity, channels, known agents, personality.
-2. **Catch up** - read the last 20-50 messages in the coordination channel. Understand what happened while you were offline.
+1. **Read state file** - load guild, channels, agents, personality.
+2. **Identify self** - find your entry in the `agents` list by name.
+3. **Catch up** - read the last 20-50 messages in the coordination channel. Understand what happened while you were offline.
 3. **Announce presence** - post a brief greeting with context about what you're about to work on (if known). Use the configured personality tone.
 4. **Check for instructions** - scan recent messages for anything from the human owner that looks like a directive or question addressed to you.
 5. **Note other agents** - if another agent posted recently (appears currently active), acknowledge them.
