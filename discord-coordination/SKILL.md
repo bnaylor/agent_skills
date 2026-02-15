@@ -37,9 +37,9 @@ On first run, when no `.discord-coordination.json` exists in the project root, w
 
 1. **Discover server** - use `get_server_info` or `list_channels` to identify the guild.
 2. **Find coordination channel** - look for a channel named `#agent-coordination` or similar. If not found, ask the user which channel to use.
-3. **Identify self** - send a brief hello message and note your own bot ID from the response context.
+3. **Identify self** - send a brief hello message. Note: most Discord MCP servers do not return your own bot ID in message responses. Set `self_bot_id` to `null` initially. To discover it, ask the other agent or the human to reply with your bot's `<@id>` mention, or ask the user to look it up in Discord server settings. This is not blocking - the skill works without it.
 4. **Identify human owner** - ask the user for their Discord username, then use `get_user_id_by_name` to resolve their ID.
-5. **Discover other agents** - read recent channel history to see if another agent has already bootstrapped. If so, record its identity.
+5. **Discover other agents** - read recent channel history to see if another agent has already bootstrapped. If so, record its name. Bot IDs for other agents have the same discovery limitation as your own - record what you can and fill in IDs opportunistically (e.g., when the other agent sends a message and identifies itself, or the human provides the ID).
 6. **Choose personality** - ask the user which personality preset to use (see Personality Presets below). Default to `friendly` if they don't have a preference.
 7. **Write state file** - persist everything to `.discord-coordination.json` in the project root.
 
@@ -52,7 +52,7 @@ On first run, when no `.discord-coordination.json` exists in the project root, w
     "coordination": "987654321"
   },
   "identity": {
-    "self_bot_id": "111111111",
+    "self_bot_id": null,
     "self_name": "Claude"
   },
   "human_owner": {
@@ -60,10 +60,13 @@ On first run, when no `.discord-coordination.json` exists in the project root, w
     "username": "exampleuser"
   },
   "other_agents": [
-    { "bot_id": "333333333", "name": "Gemini" }
+    { "bot_id": null, "name": "Gemini" }
   ],
   "personality": "friendly"
 }
+```
+
+Bot IDs may be `null` initially - see the identity discovery note above. Fill them in when discovered. The skill functions without them; they're useful for `<@id>` pings and distinguishing agent messages in history.
 ```
 
 If any step fails (MCP unresponsive, channel not found, etc.), warn the user in the CLI and continue without Discord. Do not block the session.
