@@ -1,12 +1,12 @@
 # Agent Skills
 
-A collection of skills for AI coding agents (Claude Code, etc.). Each skill is a self-contained protocol that teaches an agent how to perform a specific operational task.
+A collection of skills for AI coding agents (Gemini CLI, Claude Code, etc.). Each skill is a self-contained protocol that teaches an agent how to perform a specific operational task.
 
 ## Skills
 
 ### [discord-coordination](discord-coordination/SKILL.md)
 
-Enables AI agents to use Discord as a communication channel — posting status updates, receiving instructions from humans, and coordinating with other agents. Handles bootstrap, session startup, message protocols, multi-agent conflict avoidance, and personality presets.
+Enables AI agents to use Discord as a communication channel — posting status updates, receiving instructions from humans, and coordinating with other agents. Note: This is not fully self-driving and still requires occasional poking and prodding from the CLI, but it significantly reduces cross-agent manual coordination and instruction relaying.
 
 ### [microk8s-janitor](microk8s-janitor/SKILL.md)
 
@@ -19,7 +19,7 @@ These skills are designed to be loaded by AI agents that support skill/instructi
 1. Point your agent's skill configuration at the relevant `SKILL.md` file.
 2. The agent will follow the protocol defined in the skill when the activation conditions are met.
 
-For Claude Code, skills can be installed via the [superpowers](https://github.com/anthropics/superpowers) framework or loaded directly.
+For Gemini CLI, these can be added to your configuration to extend the agent's capabilities. For Claude Code, skills can be loaded directly.
 
 ## Structure
 
