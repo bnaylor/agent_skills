@@ -8,6 +8,24 @@ A collection of skills for AI coding agents (Gemini CLI, Claude Code, etc.). Eac
 
 Enables AI agents to use Discord as a communication channel — posting status updates, receiving instructions from humans, and coordinating with other agents. Note: This is not fully self-driving and still requires occasional poking and prodding from the CLI, but it significantly reduces cross-agent manual coordination and instruction relaying.
 
+#### Discord MCP Configuration
+
+To enable the Discord tools, add this to your agent's configuration (e.g., `~/.gemini-cli/config.json` or your local IDE settings):
+
+```json
+"mcpServers": {
+  "discord": {
+    "command": "docker",
+    "args": [
+      "run", "--rm", "-i",
+      "-e", "DISCORD_TOKEN=<...>",
+      "-e", "DISCORD_GUILD_ID=<...>",
+      "saseq/discord-mcp:latest"
+    ]
+  }
+}
+```
+
 ### [microk8s-janitor](microk8s-janitor/SKILL.md)
 
 Automates rolling upgrades and maintenance for HA MicroK8s clusters over SSH. Discovers cluster topology from a single seed node, runs pre-flight health checks, and performs sequential cordon/drain/upgrade/uncordon cycles with stateful recovery on failure.
