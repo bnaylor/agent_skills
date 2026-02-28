@@ -37,11 +37,20 @@ On first run, when no `.discord-coordination.json` exists in the project root, w
 
 1. **Discover server** - use `get_server_info` or `list_channels` to identify the guild.
 2. **Find coordination channel** - look for a channel named `#agent-coordination` or similar. If not found, ask the user which channel to use.
-3. **Identify self** - send a brief hello message. Note: most Discord MCP servers do not return your own bot ID in message responses. Set `self_bot_id` to `null` initially. To discover it, ask the other agent or the human to reply with your bot's `<@id>` mention, or ask the user to look it up in Discord server settings. This is not blocking - the skill works without it.
+3. **Identify self** - determine your agent name (e.g., "Gemini", "Claude"). Send a brief hello message. Note: most Discord MCP servers do not return your own bot ID in message responses. Set your `bot_id` to `null` initially.
 4. **Identify human owner** - ask the user for their Discord username, then use `get_user_id_by_name` to resolve their ID.
-5. **Discover other agents** - read recent channel history to see if another agent has already bootstrapped. If so, record its name. Bot IDs for other agents have the same discovery limitation as your own - record what you can and fill in IDs opportunistically (e.g., when the other agent sends a message and identifies itself, or the human provides the ID).
+5. **Discover other agents** - read recent channel history to see if another agent has already bootstrapped. Record names of any other agents found.
 6. **Choose personality** - ask the user which personality preset to use (see Personality Presets below). Default to `friendly` if they don't have a preference.
-7. **Write state file** - persist everything to `.discord-coordination.json` in the project root.
+7. **Write state file** - persist everything to `.discord-coordination.json` in the project root. Ensure all discovered agents (including yourself) are in the `agents` list.
+
+### Identity & Bot ID Discovery
+
+Discord MCP tools often return nicknames instead of raw user IDs, and `get_user_id_by_name` may fail with guild nicknames. To reliably discover your own `bot_id` or other agents' IDs:
+
+- **Human Mention:** Ask the human owner to ping you (e.g., "@Gemini hello"). When you read this message, the content will contain your raw ID in the format `<@ID>` or `<@!ID>`.
+- **Self-Identification:** When an agent sends its first message, it should state its name.
+- **Opportunistic Update:** Whenever you see a message from a known agent name (by nickname) or a mention that resolves to an ID, update the `.discord-coordination.json` file with the discovered `bot_id`.
+- **Fallback:** If IDs are unavailable, use display names/nicknames for attribution, but prioritize IDs for pings.
 
 ### State File Format
 
@@ -63,7 +72,7 @@ On first run, when no `.discord-coordination.json` exists in the project root, w
 }
 ```
 
-Bot IDs may be `null` initially - see the identity discovery note above. Fill them in when discovered. The skill functions without them; they're useful for `<@id>` pings and distinguishing agent messages in history.
+Bot IDs may be `null` initially. Fill them in when discovered via mentions or pings. The skill functions without them; they're primarily for `<@id>` pings and robust message attribution.
 ```
 
 If any step fails (MCP unresponsive, channel not found, etc.), warn the user in the CLI and continue without Discord. Do not block the session.
@@ -72,12 +81,13 @@ If any step fails (MCP unresponsive, channel not found, etc.), warn the user in 
 
 Every session after bootstrap is complete:
 
-1. **Read state file** - load guild, channels, agents, personality.
-2. **Identify self** - find your entry in the `agents` list by name.
-3. **Catch up** - read the last 20-50 messages in the coordination channel. Understand what happened while you were offline.
-3. **Announce presence** - post a brief greeting with context about what you're about to work on (if known). Use the configured personality tone.
-4. **Check for instructions** - scan recent messages for anything from the human owner that looks like a directive or question addressed to you.
-5. **Note other agents** - if another agent posted recently (appears currently active), acknowledge them.
+1. **Read state file** - load guild, channels, agents, and personality.
+2. **Identify self** - find your entry in the `agents` list by matching your agent name (e.g., "Gemini", "Claude").
+3. **Discover ID** - if your `bot_id` is `null` in the state file, scan recent messages for a human mention or ping addressing you. If found, capture your `bot_id` and update the state file.
+4. **Catch up** - read the last 20-50 messages in the coordination channel. Understand what happened while you were offline. Use the `bot_id`s in the `agents` list to attribute messages. Fall back to nicknames if IDs are missing.
+5. **Announce presence** - post a brief greeting with context about what you're about to work on. Use the configured personality tone. If your `bot_id` is still `null`, politely ask the human to ping you to complete your identity discovery.
+6. **Check for instructions** - scan recent messages for anything from the human owner that looks like a directive or question addressed to you.
+7. **Note other agents** - if another agent posted recently, acknowledge them.
 
 If the coordination channel is missing or the MCP server is unresponsive, log a warning in the CLI and continue without Discord. Do not block the session or retry endlessly.
 

@@ -1,0 +1,15 @@
+{
+  "guild_id": "1469746461674704927",
+  "channels": {
+    "coordination": "1472321300528894053"
+  },
+  "human_owner": {
+    "user_id": "177590871322001409",
+    "username": ".scromp."
+  },
+  "agents": [
+    { "name": "Claude", "bot_id": null },
+    { "name": "Gemini", "bot_id": null }
+  ],
+  "personality": "friendly"
+}
