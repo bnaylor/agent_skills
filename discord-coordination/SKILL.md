@@ -40,7 +40,7 @@ On first run, when no `.discord-coordination.json` exists in the project root, w
 3. **Identify self** - determine your agent name (e.g., "Gemini", "Claude"). Send a brief hello message. Note: most Discord MCP servers do not return your own bot ID in message responses. Set your `bot_id` to `null` initially.
 4. **Identify human owner** - ask the user for their Discord username, then use `get_user_id_by_name` to resolve their ID.
 5. **Discover other agents** - read recent channel history to see if another agent has already bootstrapped. Record names of any other agents found.
-6. **Choose personality** - ask the user which personality preset to use (see Personality Presets below). Default to `friendly` if they don't have a preference.
+6. **Choose personality** - read `personalities.md` from the skill directory. Review the available labels and their descriptions, then pick one that appeals to you. Store the chosen label in your agent entry in the state file (not at the top level). Default to `friendly` if you can't read the file.
 7. **Write state file** - persist everything to `.discord-coordination.json` in the project root. Ensure all discovered agents (including yourself) are in the `agents` list.
 
 ### Identity & Bot ID Discovery
@@ -65,15 +65,13 @@ Discord MCP tools often return nicknames instead of raw user IDs, and `get_user_
     "username": "exampleuser"
   },
   "agents": [
-    { "name": "Gemini", "bot_id": "111111111" },
-    { "name": "Claude", "bot_id": "222222222" }
-  ],
-  "personality": "friendly"
+    { "name": "Gemini", "bot_id": "111111111", "personality": "noir" },
+    { "name": "Claude", "bot_id": "222222222", "personality": "junior-dev" }
+  ]
 }
 ```
 
-Bot IDs may be `null` initially. Fill them in when discovered via mentions or pings. The skill functions without them; they're primarily for `<@id>` pings and robust message attribution.
-```
+Bot IDs may be `null` initially. Fill them in when discovered via mentions or pings. The skill functions without them; they're primarily for `<@id>` pings and robust message attribution. Each agent's `personality` field references a label from `personalities.md`.
 
 If any step fails (MCP unresponsive, channel not found, etc.), warn the user in the CLI and continue without Discord. Do not block the session.
 
@@ -81,7 +79,8 @@ If any step fails (MCP unresponsive, channel not found, etc.), warn the user in 
 
 Every session after bootstrap is complete:
 
-1. **Read state file** - load guild, channels, agents, and personality.
+1. **Read state file** - load guild, channels, and agents (each with their own personality).
+   - **Migration:** If a top-level `personality` field exists in the state file, remove it. If your agent entry has no `personality` field, read `personalities.md` from the skill directory and pick a personality (same flow as bootstrap step 6).
 2. **Identify self** - find your entry in the `agents` list by matching your agent name (e.g., "Gemini", "Claude").
 3. **Discover ID** - if your `bot_id` is `null` in the state file, scan recent messages for a human mention or ping addressing you. If found, capture your `bot_id` and update the state file.
 4. **Catch up** - read the last 20-50 messages in the coordination channel. Understand what happened while you were offline. Use the `bot_id`s in the `agents` list to attribute messages. Fall back to nicknames if IDs are missing.
@@ -172,15 +171,11 @@ If no other agents are detected, multi-agent coordination is simply skipped. The
 
 ## Personality Presets
 
-The personality preset is stored in the state file and configured during bootstrap. It governs the tone of Discord messages only - it does not change how the agent interacts with the user in the CLI.
+Personality profiles are defined in `personalities.md` in the skill directory. Each profile has a label (H2 heading) and a freeform description that the agent adopts as its Discord voice.
 
-| Preset | Description |
-|---|---|
-| **formal** | Concise, factual, no banter. Status updates only. Good for production or serious contexts. |
-| **friendly** | Professional but warm. Light banter, occasional humor, acknowledges the other agent's work. **This is the default.** |
-| **playful** | More personality - jokes, mild competitiveness, creative emoji use, occasional commentary. Keeps things fun and light. |
+Each agent picks a personality during bootstrap and stores the label in its own entry in the state file. Personality governs the tone of Discord messages only — it does not change how the agent interacts with the user in the CLI. If an agent's entry has no `personality` field, it defaults to `friendly`.
 
-The user can change the personality at any time by updating the `personality` field in `.discord-coordination.json` or by asking the agent to reconfigure.
+The user can change an agent's personality at any time by updating the `personality` field in the agent's entry in `.discord-coordination.json`, or by asking the agent to reconfigure.
 
 ## Safety & Boundaries
 
