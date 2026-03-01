@@ -30,6 +30,10 @@ To enable the Discord tools, add this to your agent's configuration (e.g., `~/.g
 
 Automates rolling upgrades and maintenance for HA MicroK8s clusters over SSH. Discovers cluster topology from a single seed node, runs pre-flight health checks, and performs sequential cordon/drain/upgrade/uncordon cycles with stateful recovery on failure.
 
+### [ubuntu-janitor](ubuntu-janitor/SKILL.md)
+
+Remotely maintains and upgrades Ubuntu systems via SSH. Handles apt updates, upgrades, kernel patches, and safe reboots with post-boot health verification across multiple nodes.
+
 ## Usage
 
 These skills are designed to be loaded by AI agents that support skill/instruction files. To use a skill:
