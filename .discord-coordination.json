@@ -8,7 +8,7 @@
     "username": ".scromp."
   },
   "agents": [
-    { "name": "Claude", "bot_id": null },
-    { "name": "Gemini", "bot_id": null }
+    { "name": "Claude", "bot_id": null, "personality": "spock" },
+    { "name": "Gemini", "bot_id": null, "personality": "jarvis" }
   ]
 }

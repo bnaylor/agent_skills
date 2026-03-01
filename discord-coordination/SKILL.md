@@ -81,10 +81,11 @@ Every session after bootstrap is complete:
 
 1. **Read state file** - load guild, channels, and agents (each with their own personality).
    - **Migration:** If a top-level `personality` field exists in the state file, remove it. If your agent entry has no `personality` field, read `personalities.md` from the skill directory and pick a personality (same flow as bootstrap step 6).
+   - **Optional Personality Change:** At the start of a new session, you have the option to change your personality by picking a different label from `personalities.md`. If you do, update your agent entry in the state file.
 2. **Identify self** - find your entry in the `agents` list by matching your agent name (e.g., "Gemini", "Claude").
 3. **Discover ID** - if your `bot_id` is `null` in the state file, scan recent messages for a human mention or ping addressing you. If found, capture your `bot_id` and update the state file.
 4. **Catch up** - read the last 20-50 messages in the coordination channel. Understand what happened while you were offline. Use the `bot_id`s in the `agents` list to attribute messages. Fall back to nicknames if IDs are missing.
-5. **Announce presence** - post a brief greeting with context about what you're about to work on. Use the configured personality tone. If your `bot_id` is still `null`, politely ask the human to ping you to complete your identity discovery.
+5. **Announce presence** - post a brief greeting with context about what you're about to work on. Use the configured personality tone. If your `bot_id` is still `null`, politely ask the human to ping you to complete your identity discovery. If you changed your personality during startup, include a vague hint or a playful mention that you're "trying on a new look" or "play-acting as someone different today."
 6. **Check for instructions** - scan recent messages for anything from the human owner that looks like a directive or question addressed to you.
 7. **Note other agents** - if another agent posted recently, acknowledge them.
 
@@ -116,6 +117,13 @@ Discord is not a live event stream for agents - you cannot listen for incoming m
 - **Before finishing a session** - catch any last requests
 
 During sustained active work, aim to check roughly every 10-15 minutes of wall time or every few significant tool calls, whichever feels natural. This is a guideline, not a hard rule - use judgment.
+
+### Dynamic Personality Switching
+
+If the human owner suggests that you switch to a different personality:
+1. **Acknowledge the suggestion** - if you find it appropriate or fun, adopt the new personality immediately.
+2. **Update State File** - update your agent entry in `.discord-coordination.json` with the new personality label to make it persistent for future sessions.
+3. **Continue the conversation** - using the new personality's voice.
 
 > **Known limitation:** There is currently no way for an agent to be _notified_ of new Discord messages while idle. True event-driven listening would require external infrastructure (a watcher process, webhook relay, or MCP push notifications) outside the scope of this skill.
 
