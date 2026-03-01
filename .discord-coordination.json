@@ -10,6 +10,5 @@
   "agents": [
     { "name": "Claude", "bot_id": null },
     { "name": "Gemini", "bot_id": null }
-  ],
-  "personality": "friendly"
+  ]
 }
