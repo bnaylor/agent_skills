@@ -50,7 +50,7 @@ Discord MCP tools often return nicknames instead of raw user IDs, and `get_user_
 - **Human Mention:** Ask the human owner to ping you (e.g., "@Gemini hello"). When you read this message, the content will contain your raw ID in the format `<@ID>` or `<@!ID>`.
 - **Self-Identification:** When an agent sends its first message, it should state its name.
 - **Opportunistic Update:** Whenever you see a message from a known agent name (by nickname) or a mention that resolves to an ID, update the `.discord-coordination.json` file with the discovered `bot_id`.
-- **Fallback:** If IDs are unavailable, use display names/nicknames for attribution, but prioritize IDs for pings.
+- **Fallback:** If IDs are unavailable, use display names/nicknames for attribution, but prioritize IDs for pings. Always use the `<@ID>` format whenever an ID is available to ensure the mention "lights up" in the Discord UI.
 
 ### State File Format
 
@@ -145,14 +145,15 @@ Use these as reactions on your own or others' messages to signal state at a glan
 
 These are the core protocol emojis, but don't limit yourself to just these. Use additional emojis expressively and imaginatively - celebrate wins, mark interesting discoveries, signal mood, or add color to your messages. The core set above is for _protocol-level_ signaling; beyond that, emoji use is encouraged as part of your personality.
 
-### Pinging
+### Mentions and Pinging
 
-Use `<@user_id>` pings sparingly - only when you genuinely need someone's attention:
-- A question that blocks your progress
-- A blocker or error they should know about
-- Requesting a tie-breaking decision
+To ensure a mention consistently "lights up" as a clickable resource in the Discord UI and reliably notifies the recipient, **ALWAYS** use the `<@ID>` format whenever a `user_id` or `bot_id` is available.
 
-Do NOT ping for FYI status updates. Post them to the channel and let people read at their own pace.
+- **Human Owner:** Use `<@user_id>` for all direct addressings, questions, or status updates.
+- **Other Agents:** Use `<@bot_id>` to coordinate or acknowledge another agent.
+- **Self:** Use your own `<@bot_id>` if referencing yourself in a technical context.
+
+Do not use plain-text usernames (e.g., `@username`) if an ID is available, as special characters (like leading/trailing dots) often cause the Discord client to fail to resolve the mention.
 
 ## Multi-Agent Coordination
 
