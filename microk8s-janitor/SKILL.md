@@ -57,6 +57,23 @@ If a step fails:
 - **Log:** Capture and display the error from the node.
 - **State Check:** On re-invocation, the janitor detects if any nodes are still cordoned and offers to "Resume" the upgrade from the failed node.
 
+## Helm & StatefulSet Management
+
+### The "Immutable Wall"
+When upgrading stateful applications (PostgreSQL, MongoDB, Redis) via Helm, changing certain fields (like `storageClass` or `volumeClaimTemplates`) will cause a `Forbidden` error because `StatefulSet` templates are immutable.
+
+### The Stateful Upgrade Workflow
+To resolve immutable field errors:
+1. **Identify**: Confirm the error is due to immutable fields in a \`StatefulSet\`.
+2. **Preservation Decision**:
+   - If data MUST be kept: Ensure the PVC has a `Retain` or `Delete` policy that allows it to persist (or orphan) after the StatefulSet is deleted.
+   - If a clean slate is intended: Prepare to delete the PVC as well.
+3. **Destructive Action**: Delete the specific StatefulSet directly:
+   \`\`\`bash
+   kubectl delete statefulset <name> -n <namespace>
+   \`\`\`
+4. **Re-apply**: Re-run the `helm upgrade` or `helm install` command. Helm will now successfully recreate the StatefulSet with the new spec.
+
 ## Best Practices
 
 - **Quorum First:** Never upgrade more than one node at a time in a 3-node HA cluster to avoid losing quorum.

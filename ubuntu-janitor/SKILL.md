@@ -45,6 +45,24 @@ For each node (or in parallel if requested):
 - Confirm all nodes are on the latest available versions.
 - Report any nodes that failed to update or reboot.
 
+## User-Scope Systemd Secrets
+
+When managing systemd services in a user scope (`--user`) over SSH, native credential loading via `LoadCredentialEncrypted` often fails with "State not recoverable" due to Polkit/session isolation.
+
+### The Decryption-Bridge Pattern
+To reliably inject encrypted secrets into user services:
+1. **Manual Decrypt**: Use `ExecStartPre` to decrypt the secret manually using `systemd-creds decrypt`.
+2. **Ephemeral Storage**: Write the decrypted value to a temporary, RAM-backed environment file (e.g., in `/run/user/UID/` or a dedicated runtime directory).
+3. **Environment Injection**: Use `EnvironmentFile=` to load the variables from the temporary file.
+
+Example:
+```systemd
+[Service]
+ExecStartPre=/usr/bin/sh -c 'systemd-creds decrypt /path/to/secret.cred > /path/to/runtime/env'
+EnvironmentFile=/path/to/runtime/env
+ExecStart=/usr/bin/your-app
+```
+
 ## Best Practices
 - **Sequential Updates**: For clusters (like K8s), update nodes one at a time.
 - **Kernel Checks**: Always check for `reboot-required` after a `dist-upgrade`.
