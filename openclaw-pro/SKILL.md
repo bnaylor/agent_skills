@@ -19,22 +19,36 @@ OpenClaw's `openclaw.json` has a strict internal schema. Minor typos or unrecogn
 
 ## Secret Providers (Infisical Integration)
 
-When using Infisical as a secret provider, use the `exec` source combined with a wrapper script.
+When using Infisical as a secret provider, use the `exec` source with a wrapper script.
 
 ```json
 "secrets": {
   "providers": {
     "infisical": {
       "source": "exec",
-      "command": "/home/clomp/fetch_secret.sh",
-      "args": ["\${SECRET_ID}"]
+      "command": "/home/clomp/fetch_secret.sh"
     }
   }
 }
 ```
 
+**Do not add `args` with a `${SECRET_ID}` placeholder.** OpenClaw does not substitute secret IDs into args. It sends secret IDs via stdin as JSON and expects JSON back on stdout (see infisical-pro skill for the protocol).
+
+### SecretRef format in config fields
+
+Use a JSON object — **not** a `ref:provider:id` string (that format is not valid):
+
+```json
+"token": { "source": "exec", "provider": "infisical", "id": "DISCORD_TOKEN" }
+```
+
+### Diagnosing secret resolution failures
+
+- `openclaw status --deep` shows resolved token length under the Channels table. If the length matches the literal `ref:provider:id` string (e.g., len 27 for `ref:infisical:DISCORD_TOKEN`), the ref was **not resolved** — check provider config and script protocol.
+- The status output also warns about `missing env var "SECRET_ID"` when `args: ["${SECRET_ID}"]` is present — remove that args entry.
+- After fixing config, run `openclaw secrets reload`. If the gateway crashes and restarts, wait ~3s and re-check status.
+
 ### Key Quirks
-- **Variable Syntax**: Use `\${SECRET_ID}` (escaped in the JSON write) to ensure OpenClaw passes the correct secret key to the command.
 - **Auth Profiles**: Be precise. The `google:default` profile requires `apiKey`, but the underlying `auth-profiles.json` storage may use `key`. Always prefer using `openclaw doctor` to bridge these differences.
 
 ## Operational Commands

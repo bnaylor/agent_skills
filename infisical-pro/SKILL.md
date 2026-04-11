@@ -22,16 +22,44 @@ Higher security via client-side credentials, but more complex to manage in self-
 
 ## Integration Patterns
 
-### The Wrapper Script Pattern
-To ensure reliable environment propagation and clean output, use a wrapper script (`fetch_secret.sh`) to call the Infisical CLI.
+### The Wrapper Script Pattern (OpenClaw exec provider)
+
+OpenClaw's `exec` secret provider communicates via **JSON stdin/stdout**, not CLI args. The script must read a JSON request from stdin and write a JSON response to stdout.
+
+**Protocol:**
+- stdin: `{ "protocolVersion": 1, "provider": "infisical", "ids": ["KEY1", "KEY2"] }`
+- stdout: `{ "protocolVersion": 1, "values": { "KEY1": "val1" }, "errors": { "KEY2": { "message": "..." } } }`
 
 ```bash
-#!/bin/sh
-export INFISICAL_TOKEN=st.xxxx.yyyy.zzzz
-export INFISICAL_API_URL=http://your-infisical-instance
-# Always use --plain and --silent for clean values
-/usr/bin/infisical secrets get "$1" --token="$INFISICAL_TOKEN" --plain --silent --domain $INFISICAL_API_URL --path /
+#!/bin/bash
+# OpenClaw exec provider for Infisical — JSON stdin/stdout protocol
+INFISICAL_TOKEN="st.xxxx.yyyy.zzzz"
+INFISICAL_API_URL="http://your-infisical-instance"
+
+input=$(cat)
+ids=$(echo "$input" | jq -r '.ids[]')
+
+values="{}"
+errors="{}"
+
+while IFS= read -r id; do
+  value=$(/usr/bin/infisical secrets get "$id" \
+    --token="$INFISICAL_TOKEN" --plain --silent \
+    --domain "$INFISICAL_API_URL" 2>/dev/null)
+  if [ -n "$value" ]; then
+    values=$(echo "$values" | jq --arg k "$id" --arg v "$value" '. + {($k): $v}')
+  else
+    errors=$(echo "$errors" | jq --arg k "$id" '. + {($k): {"message": "not found or empty"}}')
+  fi
+done <<< "$ids"
+
+jq -n --argjson v "$values" --argjson e "$errors" \
+  '{"protocolVersion": 1, "values": $v} + (if ($e | length) > 0 then {"errors": $e} else {} end)'
 ```
+
+Requires `jq` on the host. The script receives all requested IDs in one call and returns all values in one response.
+
+**Important**: The `ref:provider:id` string format used in some docs is **not valid** in `openclaw.json`. Use the JSON object SecretRef: `{ "source": "exec", "provider": "infisical", "id": "KEY_NAME" }`.
 
 ## Troubleshooting
 
