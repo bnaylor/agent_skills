@@ -16,6 +16,7 @@ OpenClaw's `openclaw.json` has a strict internal schema. Minor typos or unrecogn
 **Mandatory**: Never restart the OpenClaw service without validating the configuration first.
 - **Validation Command**: `sudo -u <user> openclaw doctor --fix` (or equivalent direct node call to `dist/index.js`).
 - **Benefit**: The `doctor` tool automatically identifies and often fixes schema drifts and permission issues.
+- **`doctor` does NOT support `--config <path>`** — it always validates the live `openclaw.json`. The safe pre-apply workflow is: backup → apply staged file → run doctor → revert from backup if doctor fails.
 
 ## Secret Providers (Infisical Integration)
 
@@ -161,10 +162,24 @@ Subagents inherit the gateway's environment, so this propagates automatically �
 ssh host 'cat config.json' | python3 -c "..." | ssh host 'cat > config.json'
 ```
 
-Safe pattern: fetch locally → transform locally → write as a staged copy on the remote:
+Safe pattern: fetch locally → transform locally → stage on remote → backup → apply → validate → revert if needed:
 
 ```bash
-ssh host 'cat config.json' > /tmp/config.json
-python3 modify.py /tmp/config.json > /tmp/config_new.json
-cat /tmp/config_new.json | ssh host 'cat > /tmp/stage.json && cp /tmp/stage.json config.json'
+# Fetch and edit locally
+ssh host 'sudo -u clomp cat ~/.openclaw/openclaw.json' > /tmp/openclaw.json
+# ... edit /tmp/openclaw.json ...
+
+# Stage on remote (use a writable path, e.g. the SSH user's home dir)
+cat /tmp/openclaw.json | ssh host 'cat > ~/openclaw_stage.json'
+ssh host 'sudo cp ~/openclaw_stage.json /home/clomp/.openclaw/openclaw.json && \
+          sudo chown clomp:clomp /home/clomp/.openclaw/openclaw.json'
+
+# Validate (doctor always reads the live file — no --config flag)
+ssh host 'sudo -u clomp openclaw doctor'
+# If doctor fails: ssh host 'sudo -u clomp cp ~/.openclaw/openclaw.json.bak ~/.openclaw/openclaw.json'
+
+# Reload (no restart needed for config changes)
+ssh host 'sudo -u clomp kill -HUP $(pgrep -f openclaw-gateway)'
 ```
+
+Note: `pgrep -f openclaw-gateway` inside a subshell may match itself; if HUP fails, get the PID first with a separate `pgrep` call and pass it directly.
