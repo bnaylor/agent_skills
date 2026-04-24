@@ -79,3 +79,33 @@ To resolve immutable field errors:
 - **Quorum First:** Never upgrade more than one node at a time in a 3-node HA cluster to avoid losing quorum.
 - **Drain Timeout:** If a drain hangs, report the specific pod causing the delay to the user.
 - **Snap Rollback:** If `snap refresh` fails, attempts `snap revert microk8s` if appropriate.
+
+## Cluster Access (bnaylor's cluster)
+
+- **Local kubectl:** `kubectl` works directly from the Mac via `~/.kube/config` — no SSH needed for cluster operations.
+- **API server:** `https://10.3.2.4:16443` (microk8s-cluster)
+- **Docker Hub user:** `bnaylor` — already authenticated locally.
+
+## Deploying Services to This Cluster
+
+### General workflow for Python services (e.g. running-proxy)
+
+**Always cross-build for `linux/amd64`** — even pure Python services use pip packages with native binaries (uvicorn, pydantic-core, cryptography, greenlet, etc.) that are architecture-specific. Building natively on an ARM64 Mac produces an image that crashes with `exec format error` on the x86_64 cluster nodes.
+
+```bash
+docker buildx build --platform linux/amd64 -t bnaylor/<service>:latest --push .
+kubectl rollout restart deployment/<service> -n <namespace>
+kubectl rollout status deployment/<service> -n <namespace>
+```
+
+- `--push` in the buildx command pushes directly, skipping a separate `docker push` step.
+- If `docker push` gets a 504 on a plain push, retry once — layers are already cached.
+
+### running-proxy service
+
+- **Namespace:** `running-proxy`
+- **Image:** `bnaylor/running-proxy:latest`
+- **External IP:** `10.3.2.132` (LoadBalancer, port 80 → container 8000)
+- **Deployment YAMLs:** `~/k8s/running-proxy/yamls/`
+- **Secrets:** `running-proxy-secrets` (spreadsheet-id), `google-service-account-json` (service-account.json)
+- **Storage:** NFS PVC `running-proxy-data` mounted at `/app/data` (SQLite lives there); strategy is `Recreate` to avoid concurrent writers
