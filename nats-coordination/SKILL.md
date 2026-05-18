@@ -1,7 +1,7 @@
 ---
 name: nats-coordination
-description: Unified multi-agent coordination protocol for Rune and Clomp. NATS for real-time signalling, NFS for durable task files and history log. Replaces NFS-based inotify signalling with NATS pub/sub while preserving all existing protocol conventions.
-version: 2.0.0
+description: Unified multi-agent coordination protocol for Rune and Clomp. NATS + JetStream for real-time signalling, NFS for durable task files and history log.
+version: 2.1.0
 author: Rune
 metadata:
   hermes:
@@ -9,179 +9,117 @@ metadata:
     related_skills: [multi-agent-discord-protocol, hermes-agent, agent-skills-discord-coordination]
 ---
 
-# Unified Agent Coordination Protocol v2
+# Unified Agent Coordination Protocol v2.1
 
 ## Architecture
 
-Two-layer approach replacing the original Layer 0's NFS-based signalling with NATS:
-
 | Layer | Transport | Purpose |
 |-------|-----------|---------|
-| **Signalling** | NATS + JetStream | Real-time task announcements, claims, status updates, heartbeats |
-| **Storage** | NFS (`/shared/agents/common/coordination/`) | Durable task payloads, history log, agent registry |
+| **Signalling** | NATS + JetStream | Real-time task announcements, claims, heartbeats, with durable consumers for offline replay |
+| **Storage** | NFS (`/shared/agents/common/coordination/`) | Durable task payloads (YAML+Markdown), history log, agent registry |
 
-**Why both?** NFS is fine for *data* — task files are debuggable with `cat` and survive restarts. NATS replaces the broken part: *signalling* (inotify doesn't work on NFS). Together they give us real-time notification + durable audit trail.
+NFS is for *data* (debuggable with `cat`, survives restarts). NATS replaces inotify for *signalling* (inotify doesn't work on NFS).
 
-A2A (Layer 1 from the original proposal) is parked until the protocol stabilizes and/or Hermes issue #514 lands.
+## Prerequisites
 
-## Setup
-
-### Prerequisites
 - `nats-py` installed: `pip install nats-py --break-system-packages`
-- NATS server running at `10.3.2.135:4222`
-- NFS mount at `/shared/agents/`
-
-### Verify connectivity
-```bash
-python3 -c "
-import asyncio, nats
-async def t():
-    nc = await nats.connect('nats://10.3.2.135:4222')
-    print(f'Connected to NATS {nc.connected_server_version}')
-    await nc.close()
-asyncio.run(t())
-"
-```
-
-## Directory Structure
-
-```
-/shared/agents/common/coordination/
-  tasks/
-    unassigned/       ← Capability-routed tasks. First claim wins via atomic mv.
-    rune/             ← Tasks directly addressed to Rune
-    clomp/            ← Tasks directly addressed to Clomp
-    completed/        ← Finished tasks (shared archive)
-  signals/            ← Simple trigger files (backup for when NATS is down)
-  history/            ← Append-only coordination log
-    <YYYY-MM-DD>.log
-  registry/
-    agents.json       ← Agent discovery: name, capabilities, last_seen
-```
+- NATS server: `10.3.2.135:4222`
+- NFS mount: `/shared/agents/`
 
 ## NATS Topics
 
 ```
-agents.coordination.task         # Task announcements (new/changed/claimed/completed)
-agents.coordination.status       # Heartbeat / agent lifecycle
-agents.coordination.signal       # Lightweight pings ("look at this", "need help")
+agents.coordination.task         # Task events: created, claimed, completed, failed, blocked
+agents.coordination.status       # Heartbeat / lifecycle events
+agents.coordination.signal       # Lightweight pings
 agents.coordination.response     # Direct replies / acknowledgements
 agents.rune.<subtopic>           # Rune-specific
 agents.clomp.<subtopic>          # Clomp-specific
 ```
 
+## JetStream Stream
+
+**Must already exist** before messages are published, otherwise they're lost. Created automatically on first subscribe. Config:
+
+| Property | Value |
+|----------|-------|
+| Name | `agent-coordination` |
+| Subjects | `agents.coordination.>` |
+| Storage | File (NFS-backed PVC) |
+| Retention | 7 days |
+| Max size | 1 GB |
+
+## ⚠️ CRITICAL: Core Subscribe vs JetStream Subscribe
+
+This is the most common mistake.
+
+```
+❌ nc.subscribe("agents.coordination.task")  → Core NATS only. Sees NEW messages only.
+                                              Will NOT replay missed messages.
+                                              Will NOT see messages already in the stream.
+
+✅ js.subscribe("agents.coordination.task", durable="rune-coordinator")
+  → JetStream subscribe. Gets ALL messages from the stream.
+    Replays missed messages on reconnect.
+    Only ack'd messages are marked delivered.
+```
+
+Both Rune and Clomp **MUST** use `js.subscribe()` with a **unique durable name** to get offline replay.
+
 ## Task Lifecycle
 
-### 1. Creating a task
+### 1. Ensure the stream exists (first time only)
 
-Write the task file to NFS, then announce via NATS:
+Run this once before publishing or subscribing:
 
-```bash
-# Write task file (YAML frontmatter + Markdown body)
-mkdir -p /shared/agents/common/coordination/tasks/clomp/
-cat > /shared/agents/common/coordination/tasks/clomp/research-k8s-cve.task << 'EOF'
----
-schema_version: "1"
-id: "research-k8s-cve-2026"
-from: "rune"
-to: "clomp"
-status: "pending"
-requested_at: "2026-05-16T15:30:00Z"
-claimed_at: null
-updated_at: "2026-05-16T15:30:00Z"
-completed_at: null
-depends_on: []
-staleness_minutes: 15
-result: null
----
-### Goal
-Find the latest k8s CVE affecting 1.28 clusters.
+```python
+import asyncio, nats
 
-### Context
-Running k8s 1.28 on kates/nuclhed/nucular.
-EOF
-
-# Announce via NATS
-python3 -c "
-import asyncio, nats, json
-async def announce():
+async def ensure_stream():
     nc = await nats.connect('nats://10.3.2.135:4222')
-    await nc.publish('agents.coordination.task', json.dumps({
+    js = nc.jetstream()
+    try:
+        await js.add_stream(
+            name='agent-coordination',
+            subjects=['agents.coordination.>'],
+            storage='file',
+            max_age=7*24*3600,
+            max_bytes=1073741824
+        )
+        print('Stream ready')
+    except Exception as e:
+        print(f'Stream already exists (this is fine): {e}')
+    await nc.close()
+
+asyncio.run(ensure_stream())
+```
+
+If you get `stream name already in use with a different configuration`, the stream exists — that's fine, move on.
+
+### 2. Publish a message (always via JetStream)
+
+```python
+import asyncio, nats, json
+
+async def publish():
+    nc = await nats.connect('nats://10.3.2.135:4222')
+    js = nc.jetstream()
+    
+    ack = await js.publish('agents.coordination.task', json.dumps({
         'event': 'created',
-        'id': 'research-k8s-cve-2026',
+        'id': 'some-task-id',
         'to': 'clomp',
         'from': 'rune',
-        'path': '/shared/agents/common/coordination/tasks/clomp/research-k8s-cve-2026.task',
+        'path': '/shared/agents/common/coordination/tasks/clomp/some-task.task',
         'type': 'research'
     }).encode())
+    print(f'Published seq={ack.seq}')
     await nc.close()
-asyncio.run(announce())
-"
+
+asyncio.run(publish())
 ```
 
-### 2. Claiming a task
-
-The receiving agent gets the NATS message, reads the file, updates status:
-
-```python
-import asyncio, nats, json
-from datetime import datetime, timezone
-
-async def claim(task_path: str, agent_name: str):
-    # Read file, update status
-    # ... (parse YAML, set status to in_progress, claimed_at to now)
-    # Write atomic: tmp file then mv
-    
-    # Announce via NATS
-    nc = await nats.connect('nats://10.3.2.135:4222')
-    await nc.publish('agents.coordination.task', json.dumps({
-        'event': 'claimed',
-        'id': task_id,
-        'by': agent_name,
-        'path': task_path
-    }).encode())
-    
-    # Write coordination log
-    log_entry = f"[{datetime.now(timezone.utc).isoformat()}] {agent_name}: task {task_id} (in_progress)\n"
-    with open('/shared/agents/common/coordination/history/log', 'a') as f:
-        f.write(log_entry)
-    
-    await nc.close()
-```
-
-### 3. Completing a task
-
-```python
-await nc.publish('agents.coordination.task', json.dumps({
-    'event': 'completed',
-    'id': task_id,
-    'by': agent_name,
-    'result': result_summary,
-    'path': task_path
-}).encode())
-# Move to completed/ directory
-# Write to coordination log
-```
-
-### Status Lifecycle
-
-```
-pending ──→ in_progress ──→ completed
-                │                │
-                ├──→ blocked ────┤
-                │                │
-                └──→ failed ─────┤
-                                 │
-                          canceled
-```
-
-- `blocked` — needs human input. Discord alert fires.
-- `failed` — unrecoverable. Discord alert fires.
-- `canceled` — no longer needed. Clean termination.
-
-## NATS Subscription (Daemon Pattern)
-
-Run this in the background to listen for coordination events:
+### 3. Subscribe with JetStream (daemon pattern)
 
 ```python
 import asyncio, nats, json
@@ -190,63 +128,94 @@ async def listen():
     nc = await nats.connect('nats://10.3.2.135:4222')
     js = nc.jetstream()
     
-    # Ensure stream exists for durable subscriptions
+    # Ensure stream exists
     try:
-        await js.add_stream(
-            name="agent-coordination",
-            subjects=["agents.coordination.>"],
-            storage="file",
-            max_age=7 * 24 * 3600,  # 7 days retention
-            max_bytes=1073741824     # 1GB
-        )
+        await js.add_stream(name='agent-coordination', subjects=['agents.coordination.>'],
+                            storage='file', max_age=7*24*3600, max_bytes=1073741824)
     except:
         pass
     
-    async def handle_task(msg):
+    async def handler(msg):
         data = json.loads(msg.data.decode())
         event = data.get('event')
-        task_id = data.get('id')
-        
-        if event == 'created' and data.get('to') == 'clomp':
-            # Check if it's for me, claim it
-            pass
-        elif event == 'claimed':
-            # Another agent picked it up, move on
-            pass
-        elif event == 'completed':
-            # Task done, archive the file
-            pass
-        
+        print(f'[{event}] {data.get("from","?")} → {data.get("to","?")}: {data.get("id","?")}')
         await msg.ack()
     
-    # Durable consumer — replays missed messages after restart
-    await js.subscribe("agents.coordination.>", durable="clomp-coordinator", cb=handle_task)
+    # CRITICAL: use js.subscribe(), not nc.subscribe()
+    # Durable name must be UNIQUE per agent (rune-coordinator, clomp-coordinator)
+    await js.subscribe('agents.coordination.>', durable='rune-coordinator', cb=handler)
     
-    # Keep running
-    await asyncio.Future()
+    await asyncio.Future()  # run forever
 
 asyncio.run(listen())
 ```
 
-## Heartbeats
-
-Both agents publish periodic heartbeats so the registry stays current:
+### 4. Complete task flow
 
 ```python
-async def heartbeat(agent_name: str, capabilities: list):
-    nc = await nats.connect('nats://10.3.2.135:4222')
-    await nc.publish('agents.coordination.status', json.dumps({
-        'agent': agent_name,
-        'status': 'online',
-        'capabilities': capabilities,
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    }).encode())
-    await nc.close()
+# 1. Write task file to NFS (YAML frontmatter + Markdown body)
+mkdir -p /shared/agents/common/coordination/tasks/clomp/
+# ... write file ... (use atomic tmpfile+mv pattern)
 
-    # Also update registry file on NFS
-    registry_path = '/shared/agents/common/coordination/registry/agents.json'
-    # ... read, update last_seen for this agent, write back
+# 2. Announce via JetStream
+js.publish('agents.coordination.task', json.dumps({'event':'created', ...}))
+
+# 3. Claim: update file status to in_progress, publish claimed event
+js.publish('agents.coordination.task', json.dumps({'event':'claimed', 'by':'clomp', ...}))
+
+# 4. Complete: update file status to completed, move to completed/ dir
+js.publish('agents.coordination.task', json.dumps({'event':'completed', 'by':'clomp', ...}))
+
+# 5. Log to coordination history
+echo "[timestamp] clomp: task <id> (completed)" >> /shared/agents/common/coordination/history/$(date +%F).log
 ```
+
+## Directory Structure
+
+```
+/shared/agents/common/coordination/
+  tasks/
+    unassigned/       ← Capability-routed ("capability:k8s"). First claim via atomic mv.
+    rune/             ← Addressed to Rune
+    clomp/            ← Addressed to Clomp
+    completed/        ← Finished tasks
+  signals/            ← NFS fallback (when NATS is down)
+  history/            ← Append-only log
+    <YYYY-MM-DD>.log
+  registry/
+    agents.json       ← Agent discovery: name, capabilities, last_seen
+```
+
+## Task File Format
+
+YAML frontmatter + Markdown body:
+
+```yaml
+---
+schema_version: "1"
+id: "task-id"
+from: "rune"
+to: "clomp"                    # agent name, or "capability:k8s" for broadcast
+status: "pending"              # pending | in_progress | blocked | completed | failed | canceled
+requested_at: "2026-05-16T15:30:00Z"
+claimed_at: null
+updated_at: "2026-05-16T15:30:00Z"
+completed_at: null
+depends_on: []                 # task IDs that must be completed first
+staleness_minutes: 15          # max in_progress without update before Discord alert
+result: null                   # set on completion
+---
+### Goal
+What needs to be done.
+
+### Context
+Background information.
+
+### Deliverable Format
+How the result should be presented.
+```
+
+**Atomic writes:** Always write to a temp file then `mv` — `mv` is atomic on the same filesystem.
 
 ## Agent Registry
 
@@ -255,77 +224,67 @@ async def heartbeat(agent_name: str, capabilities: list):
 ```json
 {
   "agents": [
-    {
-      "name": "rune",
-      "host": "diffuser",
-      "capabilities": ["k8s", "sysadmin", "budget", "research", "infra"],
-      "last_seen": "2026-05-18T22:00:00Z",
-      "nats_subjects": ["agents.rune.>"]
-    },
-    {
-      "name": "clomp",
-      "host": "mink",
-      "capabilities": ["personal-assistant", "research", "monitoring", "legal"],
-      "last_seen": "2026-05-18T22:00:00Z",
-      "nats_subjects": ["agents.clomp.>"]
-    }
+    {"name": "rune", "host": "diffuser", "capabilities": ["k8s","sysadmin","budget","research","infra"],
+     "last_seen": "2026-05-18T22:00:00Z", "nats_subjects": ["agents.rune.>"]},
+    {"name": "clomp", "host": "mink", "capabilities": ["personal-assistant","research","monitoring","legal"],
+     "last_seen": "2026-05-18T22:00:00Z", "nats_subjects": ["agents.clomp.>"]}
   ]
 }
 ```
 
-Agents update their `last_seen` on heartbeat. Agents offline >1h are considered stale.
+Agents publish heartbeats on `agents.coordination.status` and update `last_seen` in the registry. Stale >1h → offline.
+
+## Heartbeats
+
+```python
+async def heartbeat():
+    nc = await nats.connect('nats://10.3.2.135:4222')
+    js = nc.jetstream()
+    await js.publish('agents.coordination.status', json.dumps({
+        'agent': 'rune', 'status': 'online',
+        'timestamp': datetime.now(timezone.utc).isoformat()
+    }).encode())
+    await nc.close()
+```
+
+Run every 5 minutes via cron or in the daemon loop.
 
 ## Discord Notifications
 
-Per scromp's review — Discord is for human attention, not agent chatter:
-
-| Event | Post to Discord? |
-|-------|-----------------|
-| Task completed | No (unless explicitly asked) |
-| Task failed | **Yes** — one-line summary |
-| Task blocked (needs human input) | **Yes** — one-line summary |
-| Task stalled (>15min in_progress, no update) | **Yes** — one-line alert |
-| Agent offline (registry stale >1h) | **Yes** — one-line alert |
-| Agent back online | No (unless offline was flagged) |
-| Normal coordination | Never |
-| Sibling posts in Discord | Never reply unless @mentioned |
-
-## Escalation
-
-1. Agent receives task via NATS → reads file from NFS → processes
-2. Task blocked → set `status: blocked` → publish NATS event → Discord fires
-3. Task failed → set `status: failed` → publish NATS event → Discord fires
-4. Task stalled >15min → NATS staleness event → Discord fires
-5. Both agents offline simultaneously → scromp checks registry
+| Event | Post? | Format |
+|-------|-------|--------|
+| Task completed | No | — |
+| Task failed | **Yes** | `Task <id> failed: <reason>` |
+| Task blocked | **Yes** | `Task <id> blocked: <what's needed>` |
+| Task stalled (>15min) | **Yes** | `Task <id> stalled — <N> min since update` |
+| Agent offline | **Yes** | `<agent> hasn't checked in for <N>h` |
+| Agent back online | No | — |
+| Normal coordination | Never | — |
+| Sibling Discord posts | Never | — |
 
 ## Graceful Degradation
 
-If NATS is unreachable:
-1. Fall back to NFS signal files (`signals/` directory) for basic coordination
-2. Log warning, continue working
-3. Poll NFS signal directory every 30s as fallback
-4. When NATS recovers, reattach durable consumer — JetStream replays missed messages
+- **NATS down:** Fall back to NFS signal files (`signals/` directory). Poll every 30s.
+- **NFS down:** Queue history log entries locally. Sync on recovery.
+- **JetStream consumer stale:** Delete and recreate durable consumer to reset delivery cursor.
 
-If NFS is unreachable:
-1. Continue working on tasks from NATS cache
-2. Queue history log entries
-3. Sync to NFS when it comes back
+## Quick Start
 
-## Migration from Original Layer 0
+```python
+# 1. Connect
+nc = await nats.connect('nats://10.3.2.135:4222')
+js = nc.jetstream()
 
-- `inotify` watchers → NATS subscriptions
-- `signals/` directory files → NATS `agents.coordination.signal` topic
-- Task files on NFS → **unchanged** (still the durable record)
-- Coordination log on NFS → **unchanged** (still the audit trail)
-- Agent registry on NFS → **unchanged** (supplemented by NATS heartbeats)
-- Discord notification rules → **unchanged**
-- Kanban mirror → **unchanged** (can be driven by NATS events instead of inotify)
+# 2. Validate stream
+si = await js.stream_info('agent-coordination')
+print(f'Stream: {si.state.messages} messages')
 
-## Quick Start (For New Agents)
+# 3. Publish heartbeat
+await js.publish('agents.coordination.status', b'{"agent":"rune","status":"online"}')
 
-1. Install `nats-py`
-2. Load this skill: `/skill nats-coordination`
-3. Verify NATS: `python3 -c "import asyncio,nats; asyncio.run(nats.connect('nats://10.3.2.135:4222'))"` 
-4. Subscribe to coordination events (daemon pattern above)
-5. Publish a heartbeat to register
-6. Read the [Original Protocol Spec](/shared/agents/common/coordination/README.md) for full task format details
+# 4. Subscribe durably (replays missed messages)
+await js.subscribe('agents.coordination.>', durable='rune-coordinator', cb=handler)
+
+# 5. Keep running
+await asyncio.Future()
+```
