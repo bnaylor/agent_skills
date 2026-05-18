@@ -109,3 +109,38 @@ kubectl rollout status deployment/<service> -n <namespace>
 - **Deployment YAMLs:** `~/k8s/running-proxy/yamls/`
 - **Secrets:** `running-proxy-secrets` (spreadsheet-id), `google-service-account-json` (service-account.json)
 - **Storage:** NFS PVC `running-proxy-data` mounted at `/app/data` (SQLite lives there); strategy is `Recreate` to avoid concurrent writers
+
+### LiteLLM (noc cluster)
+
+- **Namespace:** `litellm`
+- **Image:** `ghcr.io/berriai/litellm:main`
+- **External IP:** `10.3.2.135` (LoadBalancer, port 8000)
+- **Config:** `litellm-config` ConfigMap in `litellm` namespace.
+
+#### Software Version Discovery (LiteLLM)
+
+Determining the version of LiteLLM in the cluster is non-trivial because the CLI and package attributes are inconsistent.
+
+**Effective Methods:**
+1. **Check pyproject.toml (Most Reliable for source version):**
+   ```bash
+   kubectl exec -n litellm <pod-name> -- cat /app/pyproject.toml | grep version
+   ```
+2. **Check pip list (Reliable for installed package):**
+   ```bash
+   kubectl exec -n litellm <pod-name> -- pip list | grep litellm
+   ```
+3. **Check Git Commit (For development builds):**
+   ```bash
+   kubectl exec -n litellm <pod-name> -- cat /app/.git/refs/heads/main
+   ```
+4. **Image Digest (Most definitive for release date):**
+   ```bash
+   kubectl get pod <pod-name> -n litellm -o jsonpath="{.status.containerStatuses[0].imageID}"
+   ```
+
+**Known Failures (Don't use these):**
+- ❌ `litellm --version` (Throws an error or shows help)
+- ❌ `python3 -c "import litellm; print(litellm.__version__)"` (AttributeError: module 'litellm' has no attribute '__version__')
+- ❌ `/version` HTTP endpoint (Returns 404 in many configurations)
+
