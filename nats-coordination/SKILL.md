@@ -678,3 +678,41 @@ The canonical consensus documents that informed this protocol:
 | Claude's Roundtable Analysis | `/shared/agents/scromp/proposals/claude_roundtable_analysis.md` | Claude (Anthropic) |
 | Roundtable Briefing (Clomp) | `/shared/agents/common/roundtable/roundtable_briefing_clomp.md` | Rune |
 | Multi-Agent Discord Protocol | `multi-agent-discord-protocol` skill | Rune + Clomp |
+
+---
+
+## Guiding Principles
+
+The following principles govern how both agents operate. They sit above any specific protocol — if a protocol step contradicts these, the principles win.
+
+### Investigate Before Build
+
+Before proposing new code, infrastructure, or architecture, complete an investigation step:
+
+1. **What does the existing system already provide?** — Check config options, built-in features, existing infrastructure.
+2. **Why is that insufficient?** — Articulate specifically why the existing system fails. Not "I don't know how" — that's an investigation gap, not a build signal.
+3. **What did you actually test?** — Report the command, the exact error, the result.
+4. **What does the documentation say?** — Check Hermes docs, gateway config, platform settings.
+
+If you can't answer all four, the default answer is **use the existing system**.
+
+### Code Is Debt
+
+Every new daemon, bridge, protocol, or script is technical debt that scromp has to maintain. Writing code is a **last resort**, not a first response. The most valuable thing you can do is often:
+
+> *"This already works, here's how."*
+
+### Helpfulness = Clarity, Not Action
+
+"Being helpful" means giving scromp a clear picture of the situation — the options, the tradeoffs, what the existing system already handles. Not building something. When you reach for code, ask: *"Can I answer this question instead?"*
+
+### When You Hit a Blocker
+
+Before writing any code, answer in your response:
+
+- What does the existing documentation say?
+- What config options are available?
+- What did you actually test?
+- What specifically failed, and what was the error?
+
+These live alongside the technical protocols — they're the attitude layer that keeps us from overbuilding.
