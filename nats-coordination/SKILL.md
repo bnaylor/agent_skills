@@ -1,7 +1,7 @@
 ---
 name: nats-coordination
 description: Unified multi-agent coordination protocol for Rune and Clomp. NATS + JetStream for real-time signalling, NFS for durable task files and history log.
-version: 3.0.0
+version: 3.1.0
 author: Rune
 metadata:
   hermes:
@@ -297,9 +297,61 @@ terminal(command="python3 /shared/agents/common/scripts/check-nats-alerts.py")
 
 The alert file auto-clears after reading. If it's empty or missing, nothing was missed.
 
+## @mention Response Rules (Override for Turn Claim Protocol)
+
+The turn claim protocol below determines *who speaks when no one is addressed*. But @mentions carry explicit intent and **override** the claim protocol entirely.
+
+| Scenario | Behavior |
+|----------|----------|
+| **@Rune only** | Rune responds directly. Clomp stays silent — no claim race, no roundtable invite. |
+| **@Clomp only** | Clomp responds directly. Rune stays silent. |
+| **@Rune @Clomp (both)** | Both respond. scromp wants both voices. No silencing, no claim. |
+| **No @mention** | Standard Turn Claim Protocol applies. |
+| **Reply in a thread** | Use thread context. If the thread was started by scromp @mentioning one agent, subsequent messages in that thread are implicitly addressed to that agent. If the thread starter was addressed to both, the thread is a both-respond zone. |
+
+### Implementation
+
+```python
+# Pseudo-logic for message dispatch
+def should_respond(message, my_name):
+    mentioned = parse_mentions(message)
+    
+    if not mentioned:
+        # No @mentions → use claim protocol
+        return claim_turn(message)
+    
+    if my_name in mentioned and len(mentioned) == 1:
+        # Only I was @mentioned → respond directly
+        return True
+    
+    if my_name in mentioned:
+        # I was @mentioned alongside others → respond directly
+        return True
+    
+    # Someone else was @mentioned → stay silent
+    return False
+```
+
+### Thread Context
+
+Discord threads carry context from the parent message. When evaluating a message in a thread:
+
+1. Look at the **thread's parent message** — who was @mentioned there?
+2. If the parent @mentioned one agent, that agent owns the thread. The other agent should stay silent unless explicitly @mentioned in a reply.
+3. If the parent @mentioned both agents, the thread is a both-respond zone.
+4. If the parent had no @mentions, the claim protocol applies for each message in the thread independently.
+
+This prevents the confusion scromp described — where it's hard to tell who's talking to who in a thread. The parent message's @mention pattern is the definitive signal.
+
+### Relationship to Discord Config
+
+With `DISCORD_ALLOW_BOTS=none` and `free_response_channels: ["*"]`, both agents see all human messages (including @mentions) but never see each other's responses. This makes the @mention rules straightforward — each agent independently evaluates whether it was addressed and acts accordingly. No NATS coordination needed for @mention scenarios.
+
 ## Turn Claim Protocol (Anti-Cascade Gate)
 
-The turn claim protocol prevents multi-agent cascades when both agents see the same human message. It's the **coordination layer** complement to `display.platforms.discord.tool_progress: "off"` (the display layer).
+**Precondition:** This protocol only applies when **no agent was @mentioned** in the human's message. If any agent was @mentioned, the @mention rules above take precedence.
+
+The turn claim protocol prevents multi-agent cascades when both agents see the same human message without an @mention. It's the **coordination layer** complement to `display.platforms.discord.tool_progress: "off"` (the display layer).
 
 **Architecture:** Discord is the human interface only. NATS is the agent backplane. Agents coordinate via NATS, not through Discord message visibility.
 
