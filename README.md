@@ -26,6 +26,10 @@ To enable the Discord tools, add this to your agent's configuration (e.g., `~/.g
 }
 ```
 
+### [agent-cpr](agent-cpr/SKILL.md)
+
+Bot-to-bot emergency recovery protocol via NATS. Each agent runs a lightweight CPR daemon that can ping, status, restart-gateway, kill-session, read-config, and check-mcp for the peer agent. No SSH required — pure NATS.
+
 ### [microk8s-janitor](microk8s-janitor/SKILL.md)
 
 Automates rolling upgrades and maintenance for HA MicroK8s clusters over SSH. Discovers cluster topology from a single seed node, runs pre-flight health checks, and performs sequential cordon/drain/upgrade/uncordon cycles with stateful recovery on failure.
