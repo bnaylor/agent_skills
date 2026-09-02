@@ -39,6 +39,23 @@ def check_connectivity(node: str) -> bool:
     code, out, err = run_ssh(node, "sudo whoami")
     return code == 0 and "root" in out
 
+def kernel_reboot_needed(node: str) -> bool:
+    """Detect a staged kernel update that requires a reboot.
+
+    Raspberry Pi OS does not create /var/run/reboot-required on kernel
+    updates, so compare the running kernel (uname -r) against the newest
+    installed kernel in /lib/modules (matching flavor).
+    """
+    cmd = (
+        'running=$(uname -r); '
+        'flavor=${running##*-rpi-}; '
+        'newest=$(ls -1v /lib/modules | grep "rpi-${flavor}$" | tail -n1); '
+        'if [ "$running" = "$newest" ]; then echo no; else echo yes; fi'
+    )
+    code, out, _ = run_ssh(node, cmd)
+    return code == 0 and out.strip() == "yes"
+
+
 def preflight_checks(node: str) -> dict:
     """Run pre-flight checks."""
     checks = {
@@ -49,9 +66,10 @@ def preflight_checks(node: str) -> dict:
         "boot_id": ""
     }
 
-    # Check reboot status
+    # Check reboot status. RPi OS does not create /var/run/reboot-required on
+    # kernel updates, so also compare running vs newest installed kernel.
     code, out, _ = run_ssh(node, "test -f /var/run/reboot-required && echo yes || echo no")
-    checks["reboot_required"] = out.strip() == "yes"
+    checks["reboot_required"] = out.strip() == "yes" or kernel_reboot_needed(node)
 
     # Get boot ID
     code, out, _ = run_ssh(node, "cat /proc/sys/kernel/random/boot_id")
@@ -141,9 +159,9 @@ def run_updates(node: str, preflight: dict, dist_upgrade: bool = False, dry_run:
     if code != 0:
         results["issues"].append(f"apt clean failed: {err}")
 
-    # 6. Check if reboot needed
+    # 6. Check if reboot needed (also detects staged kernel updates on RPi OS)
     code, out, _ = run_ssh(node, "test -f /var/run/reboot-required && echo yes || echo no")
-    reboot_needed = out.strip() == "yes"
+    reboot_needed = out.strip() == "yes" or kernel_reboot_needed(node)
 
     if reboot_needed:
         results["reboot_triggered"] = True
