@@ -96,6 +96,33 @@ class TestCheckConnectivity:
 
 
 # ---------------------------------------------------------------------------
+# kernel_reboot_needed
+# ---------------------------------------------------------------------------
+
+KERNEL_CHECK_CMD = (
+    'running=$(uname -r); '
+    'flavor=${running##*-rpi-}; '
+    'newest=$(ls -1v /lib/modules | grep "rpi-${flavor}$" | tail -n1); '
+    'if [ "$running" = "$newest" ]; then echo no; else echo yes; fi'
+)
+
+
+class TestKernelRebootNeeded:
+    def test_kernel_mismatch_returns_true(self):
+        with patch("pi_maintenance.run_ssh", return_value=(0, "yes\n", "")) as mock_ssh:
+            assert pm.kernel_reboot_needed("host") is True
+            mock_ssh.assert_called_once_with("host", KERNEL_CHECK_CMD)
+
+    def test_kernel_current_returns_false(self):
+        with patch("pi_maintenance.run_ssh", return_value=(0, "no\n", "")):
+            assert pm.kernel_reboot_needed("host") is False
+
+    def test_ssh_failure_returns_false(self):
+        with patch("pi_maintenance.run_ssh", return_value=(-1, "", "timeout")):
+            assert pm.kernel_reboot_needed("host") is False
+
+
+# ---------------------------------------------------------------------------
 # preflight_checks
 # ---------------------------------------------------------------------------
 
@@ -159,6 +186,29 @@ class TestPreflightChecks:
             mock_ssh.return_value = (1, "", "not found")
             checks = pm.preflight_checks("host")
         assert checks["pi_hole_available"] is False
+
+    def test_kernel_mismatch_sets_reboot_required(self):
+        boot_check_cmd = (
+            'boot_dir="/boot"; '
+            '[ -d "/boot/firmware" ] && boot_dir="/boot/firmware"; '
+            'df -P / "$boot_dir" | tail -n +2 | awk \'{print $4}\''
+        )
+        responses = {
+            "test -f /var/run/reboot-required && echo yes || echo no": (0, "no\n", ""),
+            KERNEL_CHECK_CMD: (0, "yes\n", ""),  # kernel mismatch
+            "cat /proc/sys/kernel/random/boot_id": (0, "initial-boot-id\n", ""),
+            boot_check_cmd: (0, "500000 500000\n", ""),
+            "sudo fuser /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null | wc -l": (0, "0\n", ""),
+            "command -v pihole": (0, "/usr/local/bin/pihole\n", ""),
+        }
+
+        def fake_run_ssh(node, command, timeout=None):
+            return responses.get(command, (-1, "", f"unexpected: {command}"))
+
+        with patch("pi_maintenance.run_ssh", side_effect=fake_run_ssh):
+            checks = pm.preflight_checks("host")
+
+        assert checks["reboot_required"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +348,44 @@ class TestRunUpdates:
                 return (0, "", "")
             if command == "test -f /var/run/reboot-required && echo yes || echo no":
                 return (0, "yes\n", "")
+            if command == "sudo reboot":
+                reboot_issued["called"] = True
+                return (0, "", "Connection closed")
+            if command == "cat /proc/sys/kernel/random/boot_id":
+                return (0, "new-boot-id\n", "")
+            return (0, "", "")
+
+        with patch("pi_maintenance.run_ssh", side_effect=fake_run_ssh), \
+             patch("pi_maintenance.check_connectivity", return_value=True), \
+             patch("time.sleep", return_value=None):
+            result = pm.run_updates("host", preflight)
+
+        assert reboot_issued.get("called") is True
+        assert result["reboot_triggered"] is True
+        assert result["reboot_success"] is True
+
+    def test_kernel_mismatch_triggers_reboot(self):
+        preflight = {
+            "pi_hole_available": True,
+            "boot_id": "old-boot-id",
+        }
+        reboot_issued = {}
+
+        def fake_run_ssh(node, command, timeout=None):
+            if command == "sudo apt-get update -y":
+                return (0, "", "")
+            if command == "sudo apt-get upgrade -y":
+                return (0, "", "")
+            if command == "sudo pihole -up":
+                return (0, "", "")
+            if command == "sudo apt-get autoremove -y":
+                return (0, "", "")
+            if command == "sudo apt-get clean":
+                return (0, "", "")
+            if command == "test -f /var/run/reboot-required && echo yes || echo no":
+                return (0, "no\n", "")
+            if command == KERNEL_CHECK_CMD:
+                return (0, "yes\n", "")  # kernel mismatch -> reboot
             if command == "sudo reboot":
                 reboot_issued["called"] = True
                 return (0, "", "Connection closed")
